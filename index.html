@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Dodge the Stupid Bullet</title>
+  <style>
+    :root{
+      --bg:#101010;
+      --panel:#1b1b1b;
+      --text:#f5f5f5;
+      --muted:#c4c4c4;
+      --accent:#ffd54a;
+    }
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+    html,body{
+      margin:0;padding:0;height:100%;overflow:hidden;
+      background:var(--bg);color:var(--text);
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      touch-action:none;
+    }
+    canvas{
+      display:block;
+      width:100vw;height:100vh;
+      background:
+        radial-gradient(circle at top, #2a2a2a 0%, #171717 38%, #101010 72%);
+    }
+    #hud{
+      position:fixed;top:10px;left:50%;transform:translateX(-50%);
+      display:flex;gap:10px;z-index:5;pointer-events:none;flex-wrap:wrap;justify-content:center;
+    }
+    .pill{
+      background:rgba(0,0,0,.42);
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:999px;
+      padding:8px 12px;
+      font-weight:800;
+      font-size:14px;
+      backdrop-filter:blur(4px);
+    }
+    #overlay{
+      position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+      background:rgba(0,0,0,.52);z-index:10;padding:20px;
+    }
+    #card{
+      width:min(92vw,430px);
+      background:rgba(24,24,24,.96);
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:22px;
+      padding:22px 18px 18px;
+      text-align:center;
+      box-shadow:0 20px 50px rgba(0,0,0,.4);
+    }
+    h1{margin:0 0 10px;font-size:30px;line-height:1.05}
+    p{margin:0 0 16px;color:var(--muted);line-height:1.4}
+    button{
+      appearance:none;border:none;border-radius:14px;
+      background:var(--accent);color:#111;
+      padding:14px 18px;font-size:17px;font-weight:900;
+      min-width:180px;
+      box-shadow:0 8px 18px rgba(0,0,0,.24);
+    }
+    .tiny{margin-top:10px;font-size:12px;color:#aaa}
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="hud">
+    <div class="pill">Time: <span id="time">0.0</span>s</div>
+    <div class="pill">Best: <span id="best">0.0</span>s</div>
+    <div class="pill">Goal: 20.0s</div>
+  </div>
+
+  <div id="overlay">
+    <div id="card">
+      <h1>Dodge the Stupid Bullet</h1>
+      <p id="sub">Drag the face anywhere and avoid the one deeply committed stupid bullet.</p>
+      <button id="startBtn">Start Being Threatened</button>
+      <div class="tiny">You are now manually testing the phrase “dodged a bullet.”</div>
+    </div>
+  </div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+const startBtn = document.getElementById('startBtn');
+const sub = document.getElementById('sub');
+const timeEl = document.getElementById('time');
+const bestEl = document.getElementById('best');
+
+let w=0,h=0,scale=1,last=0,running=false,elapsed=0,best=parseFloat(localStorage.getItem('dtsb_best_v3')||'0')||0;
+let successShown = false;
+
+const player = {
+  x:0,y:0,targetX:0,targetY:0,r:28,
+  scream:0
+};
+
+const bullet = {
+  x:0,y:0,r:13,vy:260,angle:Math.PI,trackStrength:0.55,spin:0
+};
+
+function resize(){
+  const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+  canvas.width = Math.floor(window.innerWidth * dpr);
+  canvas.height = Math.floor(window.innerHeight * dpr);
+  canvas.style.width = window.innerWidth + 'px';
+  canvas.style.height = window.innerHeight + 'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  w = window.innerWidth;
+  h = window.innerHeight;
+  scale = Math.min(w,h)/430;
+  if(!running){
+    resetPositions();
+    draw();
+  }
+}
+window.addEventListener('resize', resize);
+
+function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
+
+function resetPositions(){
+  player.r = Math.max(22, 28*scale);
+  player.x = w*0.5;
+  player.y = h*0.82;
+  player.targetX = player.x;
+  player.targetY = player.y;
+  player.scream = 0;
+
+  bullet.r = Math.max(11, 13*scale);
+  bullet.vy = Math.max(230, 260*scale);
+  bullet.trackStrength = 0.55;
+  spawnBullet(true);
+}
+
+function spawnBullet(first=false){
+  bullet.x = Math.random() * (w - 80) + 40;
+  bullet.y = -60;
+  if(!first){
+    bullet.vy = Math.min(980, bullet.vy + 22);
+    bullet.trackStrength = Math.min(1.45, bullet.trackStrength + 0.04);
+  }
+  bullet.spin = 0;
+}
+
+function setTarget(e){
+  const rect = canvas.getBoundingClientRect();
+  const p = e.touches ? e.touches[0] : e;
+  player.targetX = clamp(p.clientX - rect.left, player.r, w - player.r);
+  player.targetY = clamp(p.clientY - rect.top, 60 + player.r, h - player.r);
+}
+
+canvas.addEventListener('touchstart', e => { e.preventDefault(); setTarget(e); }, {passive:false});
+canvas.addEventListener('touchmove', e => { e.preventDefault(); setTarget(e); }, {passive:false});
+canvas.addEventListener('mousedown', e => { e.preventDefault(); setTarget(e); });
+canvas.addEventListener('mousemove', e => { if(e.buttons){ e.preventDefault(); setTarget(e); } });
+
+function updateHud(){
+  timeEl.textContent = elapsed.toFixed(1);
+  bestEl.textContent = best.toFixed(1);
+}
+
+function startGame(){
+  running = true;
+  elapsed = 0;
+  successShown = false;
+  overlay.style.display = 'none';
+  startBtn.textContent = 'Start Being Threatened';
+  sub.textContent = 'Drag the face anywhere and avoid the one deeply committed stupid bullet.';
+  resetPositions();
+  last = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function loseGame(){
+  running = false;
+  player.scream = 1;
+  if(elapsed > best){
+    best = elapsed;
+    localStorage.setItem('dtsb_best_v3', best.toFixed(1));
+  }
+  updateHud();
+  document.querySelector('#card h1').textContent = 'You Did Not Dodge It';
+  sub.innerHTML = 'Survived <b>'+elapsed.toFixed(1)+'s</b>.<br>You almost dodged that one, genius.';
+  startBtn.textContent = 'Try Not To Get Hit Again';
+  overlay.style.display = 'flex';
+}
+
+function winGame(){
+  running = false;
+  if(elapsed > best){
+    best = elapsed;
+    localStorage.setItem('dtsb_best_v3', best.toFixed(1));
+  }
+  updateHud();
+  document.querySelector('#card h1').textContent = 'Congratulations';
+  sub.innerHTML = 'You actually dodged a bullet.<br>Survived <b>'+elapsed.toFixed(1)+'s</b>. Miracles do happen.';
+  startBtn.textContent = 'Do It Again';
+  overlay.style.display = 'flex';
+}
+
+function drawFace(){
+  const x = player.x, y = player.y, r = player.r;
+  ctx.save();
+  ctx.translate(x,y);
+
+  ctx.beginPath();
+  ctx.arc(0,0,r,0,Math.PI*2);
+  ctx.fillStyle = '#f3d5a8';
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgba(0,0,0,.25)';
+  ctx.stroke();
+
+  const eyeY = -r*0.18;
+  const eyeX = r*0.34;
+
+  ctx.fillStyle = '#111';
+  ctx.beginPath();
+  ctx.arc(-eyeX, eyeY, r*0.10, 0, Math.PI*2);
+  ctx.arc( eyeX, eyeY, r*0.10, 0, Math.PI*2);
+  ctx.fill();
+
+  ctx.strokeStyle = '#5d3315';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-r*0.48, -r*0.45);
+  ctx.quadraticCurveTo(-r*0.28, -r*0.60, -r*0.06, -r*0.44);
+  ctx.moveTo(r*0.06, -r*0.44);
+  ctx.quadraticCurveTo(r*0.28, -r*0.60, r*0.48, -r*0.45);
+  ctx.stroke();
+
+  if(player.scream > 0.02){
+    ctx.strokeStyle = '#7a1a1a';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, r*0.2, r*0.18 + player.scream*r*0.16, 0, Math.PI*2);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(120,180,255,.7)';
+    ctx.beginPath();
+    ctx.ellipse(-r*0.48, -r*0.02, r*0.07, r*0.16, 0, 0, Math.PI*2);
+    ctx.ellipse( r*0.48, -r*0.02, r*0.07, r*0.16, 0, 0, Math.PI*2);
+    ctx.fill();
+  } else {
+    ctx.strokeStyle = '#7a1a1a';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, r*0.22, r*0.42, 0.15*Math.PI, 0.85*Math.PI);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function drawBullet(){
+  ctx.save();
+  ctx.translate(bullet.x, bullet.y);
+  ctx.rotate(bullet.angle);
+
+  ctx.shadowBlur = 16;
+  ctx.shadowColor = 'rgba(255,255,255,.18)';
+
+  const r = bullet.r;
+
+  // tip - point faces down toward the player because angle tracks player
+  ctx.fillStyle = '#c7c7c7';
+  ctx.beginPath();
+  ctx.moveTo(0, r*1.75);
+  ctx.lineTo(r*0.78, r*0.55);
+  ctx.lineTo(-r*0.78, r*0.55);
+  ctx.closePath();
+  ctx.fill();
+
+  // upper body
+  ctx.beginPath();
+  ctx.moveTo(-r*0.78, r*0.55);
+  ctx.lineTo(r*0.78, r*0.55);
+  ctx.lineTo(r*0.78, -r*1.05);
+  ctx.quadraticCurveTo(0, -r*1.52, -r*0.78, -r*1.05);
+  ctx.closePath();
+  ctx.fill();
+
+  // darker lower casing band
+  ctx.fillStyle = '#9a9a9a';
+  ctx.fillRect(-r*0.78, -r*0.15, r*1.56, r*0.7);
+
+  // tiny highlight
+  ctx.strokeStyle = 'rgba(255,255,255,.35)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(-r*0.28, -r*1.15);
+  ctx.lineTo(-r*0.28, r*1.0);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawBackground(){
+  ctx.clearRect(0,0,w,h);
+
+  for(let i=0;i<14;i++){
+    const yy = (i*(h/14) + elapsed*110) % h;
+    ctx.fillStyle = 'rgba(255,255,255,0.03)';
+    ctx.fillRect(0,yy,w,2);
+  }
+
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.font = `900 ${Math.max(22, 28*scale)}px system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText('DODGE THE STUPID BULLET', w/2, 48);
+
+  if(running){
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.font = `700 ${Math.max(14, 15*scale)}px system-ui, sans-serif`;
+    const trashTalk = elapsed < 6 ? 'This seems manageable.' :
+                      elapsed < 12 ? 'That bullet is getting ideas.' :
+                      elapsed < 18 ? 'You almost dodged that one, genius.' :
+                      'Hold on. Somehow this is working.';
+    ctx.fillText(trashTalk, w/2, h - 22);
+  }
+}
+
+function update(dt){
+  elapsed += dt;
+  updateHud();
+
+  const follow = 1 - Math.pow(0.001, dt);
+  player.x += (player.targetX - player.x) * follow;
+  player.y += (player.targetY - player.y) * follow;
+
+  if(player.scream > 0){
+    player.scream = Math.max(0, player.scream - dt*2.4);
+  }
+
+  // light tracking toward face
+  const dx = player.x - bullet.x;
+  const maxDrift = 220 * bullet.trackStrength;
+  const drift = clamp(dx, -maxDrift, maxDrift);
+  bullet.x += drift * dt * 0.75;
+
+  bullet.y += bullet.vy * dt;
+
+  // rotate to point at the player
+  bullet.angle = Math.atan2(player.y - bullet.y, player.x - bullet.x) - Math.PI/2;
+
+  if(bullet.y - bullet.r > h + 20){
+    spawnBullet();
+  }
+
+  // collision
+  const ddx = player.x - bullet.x;
+  const ddy = player.y - bullet.y;
+  const hitDist = player.r*0.83 + bullet.r;
+  if(ddx*ddx + ddy*ddy <= hitDist*hitDist){
+    player.scream = 1;
+    loseGame();
+    return;
+  }
+
+  if(elapsed >= 20 && !successShown){
+    successShown = true;
+    winGame();
+  }
+}
+
+function draw(){
+  drawBackground();
+  drawBullet();
+  drawFace();
+}
+
+function loop(ts){
+  if(!running) return;
+  const dt = Math.min(0.033, (ts - last)/1000);
+  last = ts;
+  update(dt);
+  draw();
+  if(running) requestAnimationFrame(loop);
+}
+
+startBtn.addEventListener('click', startGame);
+bestEl.textContent = best.toFixed(1);
+resize();
+</script>
+</body>
+</html>
